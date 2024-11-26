@@ -285,7 +285,9 @@ class Layer:
 
 
 # compute SCC, will be replaced by array2d.get_connected_components in pkpy
-def get_connected_components(map: list) -> tuple[list, list, list]:
+def get_connected_components(
+    map: list, restrictX: tuple = (-1, -1), restrictY: tuple = (-1, -1)
+) -> tuple[list, list, list]:
     """
     @map: the postfx map\n
     @tuple[list, list]: the scc map, scc list, scc emoji\n
@@ -318,20 +320,86 @@ def get_connected_components(map: list) -> tuple[list, list, list]:
                         and vis[newx][newy] == 0
                         and map[newx][newy] == map[current[0]][current[1]]
                     ):
-                        myqueue.put((newx, newy))
-                        vis[newx][newy] = scc_index
+                        if restrictX[0] == -1 and restrictY[0] == -1:
+                            myqueue.put((newx, newy))
+                            vis[newx][newy] = scc_index
+                        elif (
+                            newx >= restrictX[0]
+                            and newx <= restrictX[1]
+                            and newy >= restrictY[0]
+                            and newy <= restrictY[1]
+                        ):
+                            myqueue.put((newx, newy))
+                            vis[newx][newy] = scc_index
+                        else:
+                            continue
             scc_index += 1
     return (vis, scc_list, scc_emoji)
 
 
-def select_valid_pos(
-    layer: Layer, scc: tuple[list, list, list], mob_num: int, mob: mobBase
-) -> tuple[int, int]:
+def score(
+    layer: Layer, mob_num: int, mob: mobBase, x: int, y: int, score: float
+) -> tuple[int, int, int, int]:
     """
-    @layer: Layer class
-    @scc: return of get_connected_components
-    @mob_num: the number needed for chosen mob
-    @mob: mobBase class
+    The score function which controls the distribution of mob hordes,
+    returns the border coord of the horde\n
+    @myscore: size of horde, >0, and not too big\n
+    @return: upleft(x,y) and downright(x,y)
+    """
+    assert score > 0
+    borderx = len(layer.OriginTerrain)
+    bordery = len(layer.OriginTerrain[0])
+    griddim = int((mob_num - 1) * score + 1)
+    cnt = 0
+    expected_cnt = griddim * griddim
+    if expected_cnt < mob_num:
+        expected_cnt = mob_num
+    upx = x - griddim
+    upy = y - griddim
+    downx = x + griddim
+    downy = y + griddim
+    if upx < 0:
+        upx = 0
+    if upy < 0:
+        upy = 0
+    if downx >= borderx:
+        downx = borderx - 1
+    if downy >= bordery:
+        downy = bordery - 1
+    while True:
+        for tx in range(upx, downx + 1):
+            for ty in range(upy, downy + 1):
+                if (
+                    layer.OriginTerrain[tx][ty] in mob.terrain
+                    and layer.Occupied[tx][ty] == 0
+                ):
+                    cnt += 1
+        if cnt >= expected_cnt:
+            return (upx, upy, downx, downy)
+        else:
+            if upx > 0:
+                upx -= 1
+            if upy > 0:
+                upy -= 1
+            if downx < borderx - 1:
+                downx += 1
+            if downy < bordery - 1:
+                downy += 1
+            cnt = 0
+
+
+def select_valid_pos(
+    layer: Layer,
+    scc: tuple[list, list, list],
+    mob_num: int,
+    mob: mobBase,
+    myscore: float,
+) -> tuple[int, int, int, int, int, int]:
+    """
+    @layer: Layer class\n
+    @scc: return of get_connected_components\n
+    @mob_num: the number needed for chosen mob\n
+    @mob: mobBase class\n
     """
     x = len(layer.OriginTerrain)
     y = len(layer.OriginTerrain[0])
@@ -341,9 +409,25 @@ def select_valid_pos(
         if (
             scc[2][scc[0][anchorx][anchory] - 1] in mob.terrain
             and scc[1][scc[0][anchorx][anchory] - 1] > mob_num
-            and layer.Occupied[anchorx][anchory] == 0
         ):
-            return (anchorx, anchory)
+            scores = score(layer, mob_num, mob, anchorx, anchory, myscore)
+            return (anchorx, anchory, scores[0], scores[1], scores[2], scores[3])
+
+
+def splash_mob_gen(
+    layer: Layer,
+    mob_num: int,
+    mob: mobBase,
+    myscore: float,
+    area: tuple[int, int, int, int, int, int],
+) -> None:
+    """
+    Distribute mobs in a certain area\n
+    @area: (anchorx, anchory, upx, upy, downx, downy)\n
+    @myscore: how mobs gather, [0, 1], mobs will fill the given area if it's close to 1
+    """
+    assert myscore >= 0 and myscore <= 1
+    pass
 
 
 if __name__ == "__main__":
@@ -377,15 +461,25 @@ if __name__ == "__main__":
     # auto = initMob.choose_preset("．")
     # print(auto.emoji, auto.getnum("squad"))
     layer = Layer(postfx_map)
-    for i in range(30):
+    for i in range(10):
         chosen = initMob.choose_preset(random.choice(["．", "💦"]))
         chosen_type = random.choice(["squad", "scout"])
         chosen_num = chosen.getnum(chosen_type)
-        x, y = select_valid_pos(layer, scc, chosen_num, chosen)
+        x, y, upx, upy, downx, downy = select_valid_pos(
+            layer, scc, chosen_num, chosen, 0.3
+        )
         # TODO: add minions around leader, and fill the occupied layer
+        for xx in range(upx, downx + 1):
+            for yy in range(upy, downy + 1):
+                if (
+                    layer.OriginTerrain[xx][yy] in chosen.terrain
+                    and layer.Occupied[xx][yy] == 0
+                ):
+                    layer.Occupied[xx][yy] = 1
+                    postfx_map[xx][yy] = chosen.emoji
+        print("*" * 40, i)
+        for row in postfx_map:
+            print("".join(row))
 
-        postfx_map[x][y] = chosen.emoji
-        layer.Occupied[x][y] = 1
-
-    for row in postfx_map:
-        print("".join(row))
+    # for row in postfx_map:
+    #     print("".join(row))
