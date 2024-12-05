@@ -9,116 +9,30 @@ import random
 import time
 from array2d import array2d
 from linalg import vec2i
+from dataclasses import dataclass
+# from dataclasses import field
 
 globalrand = random.Random()
 globalrand.seed(int(time.time()))
+mob_database = [("👾","．"),
+                ("💀", "．"),
+                ("👽", "．", "💦"),
+                ("👻", "💦")]
 
-
-class mobBase:
-    name: str
+@dataclass
+class mob:
     emoji: str
-    terrain: list
-    boss: dict
-    squad: dict
-    scout: dict
-
-    def __init__(self) -> None:
-        self.name = ""
-        self.emoji = ""
-        self.terrain = []
-        self.boss = {"condition": 1}  # condition is reserved for.. is_boss_room
-        self.squad = {"condition": 0, "num": (4, 7)}
-        self.scout = {"condition": 0, "num": (1, 3)}
-
-    def getnum(self, mobname: str) -> int:
-        """
-        getnum will return a random number of preset mobs\n
-        """
-        randcls = globalrand
-        try:
-            if mobname == "boss":
-                return 1
-            elif mobname == "squad":
-                return randcls.randint(self.squad["num"][0], self.squad["num"][1])
-            elif mobname == "scout":
-                return randcls.randint(self.scout["num"][0], self.scout["num"][1])
-            else:
-                raise ValueError
-        except ValueError:
-            print("Invalid mobname")
-            raise NotImplemented
-
-
-class mobMonst(mobBase):
-    def __init__(self) -> None:
-        super().__init__()
-        self.name = "id_monst"
-        self.emoji = "👾"
-        self.terrain = ["．"]
-
-
-class mobSkull(mobBase):
-    def __init__(self) -> None:
-        super().__init__()
-        self.name = "id_skull"
-        self.emoji = "💀"
-        self.terrain = ["．"]
-
-
-class mobAlien(mobBase):
-    def __init__(self) -> None:
-        super().__init__()
-        self.name = "id_alien"
-        self.emoji = "👽"
-        self.terrain = ["．", "💦"]
-
-
-class mobGhost(mobBase):
-    def __init__(self) -> None:
-        super().__init__()
-        self.name = "id_ghost"
-        self.emoji = "👻"
-        self.terrain = ["💦"]
-
-
-class PresetMob:
+    num: int
+    terrain: list[str]
+    
+def get_random_mob(num_preset:tuple[int,int] = (4,7)) -> mob:
     """
-    Presets for mobs, including: \n
-    dotMob: "👾", "💀", "👽"\n
-    sharpMob: "👻", "👽"\n
-    dot = ".", sharp = "💦"
+    get a random kind of mob from the database\n
+    @num_preset: (min, max) of the number of mobs\n
     """
-
-    dotMob: list
-    sharpMob: list
-    id_monst: mobMonst
-    id_skull: mobSkull
-    id_alien: mobAlien
-    id_ghost: mobGhost
-
-    def __init__(self) -> None:
-        id_monst = mobMonst()
-        id_skull = mobSkull()
-        id_alien = mobAlien()
-        id_ghost = mobGhost()
-        self.dotMob = [id_monst, id_skull, id_alien]
-        self.sharpMob = [id_ghost, id_alien]
-
-    def choose_preset(self, terrain: str) -> mobBase:
-        """choose a preset randomly due to the terrain"""
-        # randcls = random.Random()
-        # randcls.seed(time.time())
-        try:
-            if terrain == "．":
-                return random.choice(self.dotMob)
-            elif terrain == "💦":
-                return random.choice(self.sharpMob)
-            else:
-                raise ValueError
-        except ValueError:
-            print("Invalid terrain")
-            raise NotImplemented
-
+    mob_num = globalrand.randint(num_preset[0], num_preset[1])
+    mob_choice = globalrand.choice(mob_database)
+    return mob(mob_choice[0], mob_num, mob_choice[1:])
 
 class Layer:
     """
@@ -197,8 +111,8 @@ def flood_fill_wall(map: array2d) -> tuple[array2d, list, list]:
     for _ in range(visnum - 1):
         scc_emoji.append("💦")
     scc_count = []
-    for _ in range(visnum+1):
-        scc_count.append(vis.count(_))
+    for cnt in range(visnum+1):
+        scc_count.append(vis.count(cnt))
     return (vis, scc_emoji, scc_count)
 
 
@@ -207,8 +121,7 @@ def select_valid_pos(
     scc: array2d,
     scc_emoji: list,
     scc_cnt: list,
-    mob_num: int,
-    mob: mobBase,
+    mob: mob,
     myscore: float
 ) -> tuple[int, int, tuple[int, int, int, int]]:
     """
@@ -223,11 +136,11 @@ def select_valid_pos(
     while True:
         anchorx = randcls.randint(0, x - 1)
         anchory = randcls.randint(0, y - 1)
-        if scc_emoji[scc[anchorx, anchory]] in mob.terrain and scc_cnt[scc[anchorx, anchory]] >= mob_num:
-            scores = score(layer, mob_num, mob, anchorx, anchory, myscore)
+        if scc_emoji[scc[anchorx, anchory]] in mob.terrain and scc_cnt[scc[anchorx, anchory]] >= mob.num:
+            scores = score(layer, mob, anchorx, anchory, myscore)
             return (anchorx, anchory, scores)
         
-def score(layer:Layer, mob_num:int, mob:mobBase, x:int, y:int, score:float) -> tuple[int, int, int, int]:
+def score(layer:Layer, mob:mob, x:int, y:int, score:float) -> tuple[int, int, int, int]:
     """
     The score function which controls the distribution of mob hordes,
     returns the border coord of the horde\n
@@ -237,11 +150,11 @@ def score(layer:Layer, mob_num:int, mob:mobBase, x:int, y:int, score:float) -> t
     assert score > 0
     borderx = layer.OriginTerrain.width
     bordery = layer.OriginTerrain.height
-    griddim = int((mob_num - 1) * score + 1)
+    griddim = int((mob.num - 1) * score + 1)
     cnt = 0
     expected_cnt = griddim * griddim
-    if expected_cnt < mob_num:
-        expected_cnt = mob_num
+    if expected_cnt < mob.num:
+        expected_cnt = mob.num
     upx = x - griddim
     upy = y - griddim
     downx = x + griddim
@@ -272,6 +185,18 @@ def score(layer:Layer, mob_num:int, mob:mobBase, x:int, y:int, score:float) -> t
                 downy += 1
             cnt = 0
 
+def spawn_splash(map: array2d, layer:Layer, i:int, mob:mob, x:int, y:int, rect:tuple[int,int,int,int], splash:float, center:bool = True) -> None:
+    """
+    generate horde sample\n
+    @i: the index of horde, should be i + 1 of the current loop\n
+    @x: anchor x, the center of horde\n
+    @y: anchor y, the center of horde\n
+    @rect: the border of horde\n
+    @splash: the splash range of horde, close to 0 will be more concentrate\n
+    @center: True will generate around the (x,y)\n
+    """
+    
+    pass
 
 if __name__ == "__main__":
     mymap = generate_noise(50, 30, 40, 2024)
@@ -288,21 +213,21 @@ if __name__ == "__main__":
     #     if x == mymap.width - 1:
     #         print("\n")
 
-    initMob = PresetMob()
     layer = Layer(mymap)
     for i in range(10):
-        chosen = initMob.choose_preset(random.choice(["．", "💦"]))
-        chosen_type = random.choice(["squad", "scout"])
-        chosen_num = chosen.getnum(chosen_type)
-        x,y, rect = select_valid_pos(layer, scc, scc_emoji, scc_cnt, chosen_num, chosen, 0.3)
+        current_mob = get_random_mob()
+        x,y, rect = select_valid_pos(layer, scc, scc_emoji, scc_cnt, current_mob, 0.3)
         upx, upy, downx, downy = rect
         for xx in range(upx, downx + 1):
             for yy in range(upy, downy + 1):
-                if (layer.OriginTerrain[xx,yy] in chosen.terrain and layer.Occupied[xx,yy] == 0):
-                    layer.Occupied[xx,yy] = 1
-                    mymap[xx,yy] = chosen.emoji
+                if (layer.OriginTerrain[xx,yy] in current_mob.terrain and layer.Occupied[xx,yy] == 0):
+                    layer.Occupied[xx,yy] = i + 1
+                    mymap[xx,yy] = current_mob.emoji
         print("*" * 40, i)
         for x, y, val in mymap:
             print(val, end=" ")
             if x == mymap.width - 1:
                 print("\n")
+    test = mob("!", 3, ["💦"])
+    test1 = mob("!", 3, ["e"])
+    
