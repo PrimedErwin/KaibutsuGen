@@ -46,36 +46,37 @@ class Layer:
     """
     Creates copy of map.\n
     Including original map and cells ocuupied by mobs\n
+    @set occupied = -1 if generated mob on it
     """
 
-    terrain: array2d
-    occupied: array2d
+    terrain: array2d[str]
+    occupied: array2d[int]
 
-    def __init__(self, map: array2d) -> None:
-        self.terrain = map.copy()
-        self.occupied = array2d(map.width, map.height, 0)
+    def __init__(self, mymap: array2d[str]) -> None:
+        self.terrain = mymap.copy()
+        self.occupied = array2d(mymap.width, mymap.height, 0)
 
 
-def generate_noise(x: int, y: int, prob: int, seed: float | None = None) -> array2d:
+def generate_noise(x: int, y: int, prob: int, seed: float | None = None) -> array2d[str]:
     randcls = random.Random()
     if seed is None:
         seed = int(time.time())
     randcls.seed(seed)
-    map = array2d(x, y)
-    map.apply_(lambda x: "💦" if randcls.randint(1, 100) <= prob else "．")
-    return map
+    mymap = array2d(x, y)
+    mymap.apply_(lambda x: "💦" if randcls.randint(1, 100) <= prob else "．")
+    return mymap
 
-def border_assist(map: array2d, kernelf1: array2d, kernelf2:array2d, f1:int, f2:int) -> array2d:
+def _border_assist(mymap: array2d[int], kernelf1: array2d[int], kernelf2:array2d[int], f1:int, f2:int) -> array2d[int]:
     """
     assist function for postfix_noise\n
     Make sure the border of the map is wall\n
     """
-    w = map.width
-    h = map.height
+    w = mymap.width
+    h = mymap.height
     retmap = array2d(w, h, 1)#a temporary map with all 1 inside
-    f1cnt = map.convolve(kernelf1, 0)
+    f1cnt = mymap.convolve(kernelf1, 0)
     if f2 != 0:
-        f2cnt = map.convolve(kernelf2, 0)
+        f2cnt = mymap.convolve(kernelf2, 0)
     else:
         f2cnt = array2d(w, h, 0)
     for y in range(1, h-1):
@@ -89,18 +90,19 @@ def border_assist(map: array2d, kernelf1: array2d, kernelf2:array2d, f1:int, f2:
                 retmap[coordinate] = 0
     return retmap
 
-def postfix_noise(map: array2d, loop: int, f1: int, f2: int = 0) -> array2d:
+def postfix_noise(mymap: array2d[str], loop: int, f1: int, f2: int = 0) -> array2d[str]:
     """
     process the impulse noise map\n
     The function loops 'loop' times, and replace the cell judging with threshold f1 and f2.\n
     """
-    w = map.width
-    h = map.height
-    nummap = map.map(lambda x: 1 if x == "💦" else 0)
+    w = mymap.width
+    h = mymap.height
+    nummap = mymap.map(lambda x: 1 if x == "💦" else 0)
+    #convolution kernels
     kernelf1 = array2d(3, 3, 1)
     kernelf2 = array2d(5, 5, 1)
     kernelf2[0, 0] = kernelf2[4, 0] = kernelf2[0, 4] = kernelf2[4, 4] = 0  # exclude the corners
-    nummap = border_assist(nummap, kernelf1, kernelf2, f1, f2)
+    nummap = _border_assist(nummap, kernelf1, kernelf2, f1, f2)
     for _ in range(loop-1):
         f1cnt = nummap.convolve(kernelf1, 0)
         if f2 != 0:
@@ -120,17 +122,17 @@ def postfix_noise(map: array2d, loop: int, f1: int, f2: int = 0) -> array2d:
     # return nummap
 
 
-def flood_fill_wall(map: array2d) -> tuple[array2d, list, list]:
+def flood_fill_wall(mymap: array2d[str]) -> tuple[array2d[int], list, list]:
     """
     floods the map and replace where it walks with wall\n
     @Return: (vis, scc_emoji, scc_area), vis with not 0 index is not empty
     """
-    toreplace = map[vec2i(0,0)]
+    toreplace = mymap[vec2i(0,0)]
     assert toreplace == "💦"
-    vis, visnum = map.get_connected_components(toreplace, "von Neumann")
+    vis, visnum = mymap.get_connected_components(toreplace, "von Neumann")
     for _xy, val in vis:
         if val == 1:
-            map[_xy] = "🧱"
+            mymap[_xy] = "🧱"
     scc_emoji = ["．", "🧱"]
     for _ in range(visnum - 1):
         scc_emoji.append("💦")
@@ -142,27 +144,27 @@ def flood_fill_wall(map: array2d) -> tuple[array2d, list, list]:
 
 def select_valid_pos(
     layer: Layer,
-    scc: array2d,
+    scc: array2d[int],
     scc_emoji: list,
-    scc_cnt: list,
+    scc_area: list,
     mob: Mob,
     myscore: float
 ) -> tuple[int, int, tuple[int, int, int, int]]:
     """
-    select a valid place for the mob horde.\n
+    select a valid area for the mob horde. Border points are INCLUDED\n
     @Return: the center position and the border coordinate of the rectangle\n
     """
     w = scc.width
     h = scc.height
     while True:
-        #find a random center position and evaluate it's nearby cells by 'score' func
+        #find a random center position and evaluate it's nearby cells by '_score' func
         anchorx = random.randint(0, w - 1)
         anchory = random.randint(0, h - 1)
-        if scc_emoji[scc[anchorx, anchory]] in mob.terrain and scc_cnt[scc[anchorx, anchory]] >= mob.num:
-            scores = score(layer, mob, anchorx, anchory, myscore)
+        if scc_emoji[scc[anchorx, anchory]] in mob.terrain and scc_area[scc[anchorx, anchory]] >= mob.num:
+            scores = _score(layer, mob, anchorx, anchory, myscore)
             return (anchorx, anchory, scores)
         
-def score(layer:Layer, mob:Mob, x:int, y:int, score:float) -> tuple[int, int, int, int]:
+def _score(layer:Layer, mob:Mob, x:int, y:int, score:float) -> tuple[int, int, int, int]:
     """
     The score function which controls the distribution of mob hordes,
     returns the border coord of the horde\n
@@ -190,9 +192,9 @@ def score(layer:Layer, mob:Mob, x:int, y:int, score:float) -> tuple[int, int, in
     if downy >= bordery:
         downy = bordery - 1
     while True:
-        for tx in range(upx, downx + 1):
-            for ty in range(upy, downy + 1):
-                if (layer.terrain[tx,ty] in mob.terrain and layer.occupied[tx,ty] == 0):
+        for _x in range(upx, downx + 1):#Border points are INCLUDED, so downx + 1 here
+            for _y in range(upy, downy + 1):
+                if (layer.terrain[_x, _y] in mob.terrain and layer.occupied[_x ,_y] == 0):
                     cnt += 1
         if cnt >= expected_cnt:
             return (upx, upy, downx, downy)
@@ -207,26 +209,69 @@ def score(layer:Layer, mob:Mob, x:int, y:int, score:float) -> tuple[int, int, in
                 downy += 1
             cnt = 0
 
-def spawn_splash(map: array2d, layer:Layer, i:int, mob:Mob, x:int, y:int, rect:tuple[int,int,int,int], splash:float, center:bool = True) -> None:
+def _dist_unsqrt(coord1: vec2i, coord2: vec2i) -> int:
+    """
+    calculate the distance between coord1 and coord2, not sqrted\n
+    """
+    return abs(coord1.x-coord2.x)**2 + abs(coord1.y-coord2.y)**2
+
+def _splash_factor_assist(current_pos:vec2i, center_pos:vec2i, splash_factor: float, range: int, basic_prob: int) -> bool:
+    """
+    return True if here can generate a mob\n
+    """
+    dist = _dist_unsqrt(current_pos, center_pos)
+    
+    return False
+    
+
+def spawn_splash(mymap: array2d[str], layer:Layer, i:int, mob:Mob, x:int, y:int, rect:tuple[int,int,int,int], splash_factor:float) -> None:
     """
     generate horde sample\n
-    @i: the index of horde, should be i + 1 of the current loop, for layer.Occupied propose\n
-    @x: anchor x, the center of horde\n
-    @y: anchor y, the center of horde\n
-    @rect: the border of horde\n
-    @splash: the splash range of horde, close to 0 will be more concentrate\n
-    @center: True will generate around the (x,y)\n
+    factor = (0,1) 0=closer
+    - TODO
+    Imagine a largest circle on the rect, which has its center on (x,y). 
+    As we know the basic param of a circle is d and r (d=2r), so with the
+    splash_factor, we have r_new = r * splash_factor.
+    Thus we have a new circle. Points in the circle have a high probablity 
+    to generate mobs, while those outside have a lower probablity. 
+    
+    But the probablity cannot be set to a step func, which would lead
+    to ridiculous result.
+    
+    The probability func should be: input factor, range, return prob
+    factor close to 1, almost equal prob within the range
+    factor close to 0, decreasing prob along with range
     """
     upx, upy, downx, downy = rect
+    #calculate the maximum distance from the center
+    max_x = max(abs(x - upx), abs(x - downx))
+    max_y = max(abs(y - upy), abs(y - downy))
+    max_range = max_x**2 + max_y**2
+    new_range = int(max_range * splash_factor)
+    center_pos = vec2i(x, y)
+    #calculate the basic probablity
+    area = abs(upx-downx)*abs(upy-downy)
+    basic_prob = int(mob.num/area*100)
     
-        
-    pass
+    generated_mob_cnt = 0
+    
+    for _y in range(upy, downy + 1):
+        for _x in range(upx, downx + 1):
+            coord = vec2i(_x, _y)
+            if layer.occupied == i and layer.terrain[coord] in mob.terrain and generated_mob_cnt < mob.num:
+                #valid terrain and not occupied by other mobs
+                result = _splash_factor_assist(coord, center_pos, splash_factor, new_range, basic_prob)
+                if result:
+                    layer.occupied[coord] = -1
+                    mymap[coord] = mob.emoji
+                    generated_mob_cnt += 1
+    
 
 if __name__ == "__main__":
     mymap = generate_noise(50, 30, 40, 2024)
     mymap = postfix_noise(mymap, 4, 5, 1)
     mymap = postfix_noise(mymap, 3, 5)
-    scc, scc_emoji, scc_cnt = flood_fill_wall(mymap)
+    scc, scc_emoji, scc_area = flood_fill_wall(mymap)
     # for x, y, val in mymap:
     #     print(val, end=" ")
     #     if x == mymap.width - 1:
@@ -240,7 +285,7 @@ if __name__ == "__main__":
     layer = Layer(mymap)
     for i in range(10):
         current_mob = get_random_mob()
-        x,y, rect = select_valid_pos(layer, scc, scc_emoji, scc_cnt, current_mob, 0.3)
+        x,y, rect = select_valid_pos(layer, scc, scc_emoji, scc_area, current_mob, 0.3)
         upx, upy, downx, downy = rect
         for xx in range(upx, downx + 1):
             for yy in range(upy, downy + 1):
