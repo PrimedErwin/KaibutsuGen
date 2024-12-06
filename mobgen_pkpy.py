@@ -10,45 +10,50 @@ import time
 from array2d import array2d
 from linalg import vec2i
 from dataclasses import dataclass
-# from dataclasses import field
 
-globalrand = random.Random()
-globalrand.seed(int(time.time()))
-mob_database = [("👾","．"),
-                ("💀", "．"),
-                ("👽", "．", "💦"),
-                ("👻", "💦")]
+
+# mob_database = [("👾","．"),
+#                 ("💀", "．"),
+#                 ("👽", "．", "💦"),
+#                 ("👻", "💦")]
+
+mob_terrain : dict[str, list[str]] = {
+    "👾": ["．"],
+    "💀": ["．"],
+    "👽": ["．", "💦"],
+    "👻": ["💦"]
+}
+
+mob_list = list(mob_terrain.keys())
 
 @dataclass
-class mob:
+class Mob:
     emoji: str
     num: int
     terrain: list[str]
     
-def get_random_mob(num_preset:tuple[int,int] = (4,7)) -> mob:
+def get_random_mob(mob_num_range:tuple[int,int] = (4,7)) -> Mob:
     """
     get a random kind of mob from the database\n
     @num_preset: (min, max) of the number of mobs\n
     """
-    mob_num = globalrand.randint(num_preset[0], num_preset[1])
-    mob_choice = globalrand.choice(mob_database)
-    return mob(mob_choice[0], mob_num, mob_choice[1:])
+    min_num, max_num = mob_num_range
+    mob_num = random.randint(min_num, max_num)
+    mob_choice = random.choice(mob_list)
+    return Mob(mob_choice, mob_num, mob_terrain[mob_choice])
 
 class Layer:
     """
     Creates copy of map.\n
-    @OriginTerrain: original terrain without mobs\n
-    @Occupied: the cells occupied by mobs, cannot generate mobs again on them
+    Including original map and cells ocuupied by mobs\n
     """
 
-    OriginTerrain: array2d
-    Occupied: array2d
+    terrain: array2d
+    occupied: array2d
 
     def __init__(self, map: array2d) -> None:
-        x = map.width
-        y = map.height
-        self.OriginTerrain = map.copy()
-        self.Occupied = array2d(x, y, 0)
+        self.terrain = map.copy()
+        self.occupied = array2d(map.width, map.height, 0)
 
 
 def generate_noise(x: int, y: int, prob: int, seed: float | None = None) -> array2d:
@@ -57,41 +62,60 @@ def generate_noise(x: int, y: int, prob: int, seed: float | None = None) -> arra
         seed = int(time.time())
     randcls.seed(seed)
     map = array2d(x, y)
-    for x, y, _ in map:
-        map[x, y] = "💦" if randcls.randint(1, 100) <= prob else "．"
+    map.apply_(lambda x: "💦" if randcls.randint(1, 100) <= prob else "．")
     return map
 
+def border_assist(map: array2d, kernelf1: array2d, kernelf2:array2d, f1:int, f2:int) -> array2d:
+    """
+    assist function for postfix_noise\n
+    Make sure the border of the map is wall\n
+    """
+    w = map.width
+    h = map.height
+    retmap = array2d(w, h, 1)#a temporary map with all 1 inside
+    f1cnt = map.convolve(kernelf1, 0)
+    if f2 != 0:
+        f2cnt = map.convolve(kernelf2, 0)
+    else:
+        f2cnt = array2d(w, h, 0)
+    for y in range(1, h-1):
+        for x in range(1, w-1):
+            coordinate = vec2i(x, y)
+            f1val = f1cnt[coordinate]
+            f2val = f2cnt[coordinate]
+            if f1val >= f1 or (f2 != 0 and f2val <= f2):
+                retmap[coordinate] = 1
+            else:
+                retmap[coordinate] = 0
+    return retmap
 
 def postfix_noise(map: array2d, loop: int, f1: int, f2: int = 0) -> array2d:
     """
     process the impulse noise map\n
-    @map: the noise map\n
-    @loop: times of postfx\n
-    @f1: threshold of tiles being walls with 1 step, != 0\n
-    @f2: threshold of tiles being walls with 2 steps, can be 0\n
+    The function loops 'loop' times, and replace the cell judging with threshold f1 and f2.\n
     """
-    x = map.width
-    y = map.height
+    w = map.width
+    h = map.height
     nummap = map.map(lambda x: 1 if x == "💦" else 0)
-    all1map = array2d(x, y, 1)
-    f1cnt = array2d(x, y, 0)
-    f2cnt = array2d(x, y, 0)
     kernelf1 = array2d(3, 3, 1)
     kernelf2 = array2d(5, 5, 1)
     kernelf2[0, 0] = kernelf2[4, 0] = kernelf2[0, 4] = kernelf2[4, 4] = 0  # exclude the corners
-    for _ in range(loop):
+    nummap = border_assist(nummap, kernelf1, kernelf2, f1, f2)
+    for _ in range(loop-1):
         f1cnt = nummap.convolve(kernelf1, 0)
         if f2 != 0:
             f2cnt = nummap.convolve(kernelf2, 0)
-        for tuple1, tuple2 in zip(f1cnt, f2cnt):
-            _x, _y, f1val = tuple1
-            _, _, f2val = tuple2
-            if 0 < _x < x - 1 and 0 < _y < y - 1:
+        else:
+            f2cnt = array2d(w, h, 0)
+        for y in range(1, h-1):
+            for x in range(1, w-1):
+                coordinate = vec2i(x, y)
+                f1val = f1cnt[coordinate]
+                f2val = f2cnt[coordinate]
                 if f1val >= f1 or (f2 != 0 and f2val <= f2):
-                    all1map[_x, _y] = 1
+                    nummap[coordinate] = 1
                 else:
-                    all1map[_x, _y] = 0
-        nummap = all1map
+                    nummap[coordinate] = 0
     return nummap.map(lambda x: "💦" if x == 1 else "．")
     # return nummap
 
@@ -99,21 +123,21 @@ def postfix_noise(map: array2d, loop: int, f1: int, f2: int = 0) -> array2d:
 def flood_fill_wall(map: array2d) -> tuple[array2d, list, list]:
     """
     floods the map and replace where it walks with wall\n
-    @Return: (vis, scc_emoji, scc_count), vis with not 0 index is not empty
-    @scc_emoji and scc_count are correspond to vis's indices
+    @Return: (vis, scc_emoji, scc_area), vis with not 0 index is not empty
     """
-    toreplace = map.get(0, 0)
+    toreplace = map[vec2i(0,0)]
+    assert toreplace == "💦"
     vis, visnum = map.get_connected_components(toreplace, "von Neumann")
-    for _x, _y, val in vis:
+    for _xy, val in vis:
         if val == 1:
-            map[_x, _y] = "🧱"
+            map[_xy] = "🧱"
     scc_emoji = ["．", "🧱"]
     for _ in range(visnum - 1):
         scc_emoji.append("💦")
-    scc_count = []
+    scc_area = []
     for cnt in range(visnum+1):
-        scc_count.append(vis.count(cnt))
-    return (vis, scc_emoji, scc_count)
+        scc_area.append(vis.count(cnt))
+    return (vis, scc_emoji, scc_area)
 
 
 def select_valid_pos(
@@ -121,35 +145,33 @@ def select_valid_pos(
     scc: array2d,
     scc_emoji: list,
     scc_cnt: list,
-    mob: mob,
+    mob: Mob,
     myscore: float
 ) -> tuple[int, int, tuple[int, int, int, int]]:
     """
-    @layer: Layer class\n
-    @scc: return of get_connected_components\n
-    @mob_num: the number needed for chosen mob\n
-    @mob: mobBase class\n
+    select a valid place for the mob horde.\n
+    @Return: the center position and the border coordinate of the rectangle\n
     """
-    randcls = globalrand
-    x = scc.width
-    y = scc.height
+    w = scc.width
+    h = scc.height
     while True:
-        anchorx = randcls.randint(0, x - 1)
-        anchory = randcls.randint(0, y - 1)
+        #find a random center position and evaluate it's nearby cells by 'score' func
+        anchorx = random.randint(0, w - 1)
+        anchory = random.randint(0, h - 1)
         if scc_emoji[scc[anchorx, anchory]] in mob.terrain and scc_cnt[scc[anchorx, anchory]] >= mob.num:
             scores = score(layer, mob, anchorx, anchory, myscore)
             return (anchorx, anchory, scores)
         
-def score(layer:Layer, mob:mob, x:int, y:int, score:float) -> tuple[int, int, int, int]:
+def score(layer:Layer, mob:Mob, x:int, y:int, score:float) -> tuple[int, int, int, int]:
     """
     The score function which controls the distribution of mob hordes,
     returns the border coord of the horde\n
-    @myscore: size of horde, >0, and not too big\n
+    @myscore: size of horde, >0, and better not bigger than 1\n
     @return: upleft(x,y) and downright(x,y)
     """
     assert score > 0
-    borderx = layer.OriginTerrain.width
-    bordery = layer.OriginTerrain.height
+    borderx = layer.terrain.width
+    bordery = layer.terrain.height
     griddim = int((mob.num - 1) * score + 1)
     cnt = 0
     expected_cnt = griddim * griddim
@@ -170,7 +192,7 @@ def score(layer:Layer, mob:mob, x:int, y:int, score:float) -> tuple[int, int, in
     while True:
         for tx in range(upx, downx + 1):
             for ty in range(upy, downy + 1):
-                if (layer.OriginTerrain[tx,ty] in mob.terrain and layer.Occupied[tx,ty] == 0):
+                if (layer.terrain[tx,ty] in mob.terrain and layer.occupied[tx,ty] == 0):
                     cnt += 1
         if cnt >= expected_cnt:
             return (upx, upy, downx, downy)
@@ -185,17 +207,19 @@ def score(layer:Layer, mob:mob, x:int, y:int, score:float) -> tuple[int, int, in
                 downy += 1
             cnt = 0
 
-def spawn_splash(map: array2d, layer:Layer, i:int, mob:mob, x:int, y:int, rect:tuple[int,int,int,int], splash:float, center:bool = True) -> None:
+def spawn_splash(map: array2d, layer:Layer, i:int, mob:Mob, x:int, y:int, rect:tuple[int,int,int,int], splash:float, center:bool = True) -> None:
     """
     generate horde sample\n
-    @i: the index of horde, should be i + 1 of the current loop\n
+    @i: the index of horde, should be i + 1 of the current loop, for layer.Occupied propose\n
     @x: anchor x, the center of horde\n
     @y: anchor y, the center of horde\n
     @rect: the border of horde\n
     @splash: the splash range of horde, close to 0 will be more concentrate\n
     @center: True will generate around the (x,y)\n
     """
+    upx, upy, downx, downy = rect
     
+        
     pass
 
 if __name__ == "__main__":
@@ -220,14 +244,13 @@ if __name__ == "__main__":
         upx, upy, downx, downy = rect
         for xx in range(upx, downx + 1):
             for yy in range(upy, downy + 1):
-                if (layer.OriginTerrain[xx,yy] in current_mob.terrain and layer.Occupied[xx,yy] == 0):
-                    layer.Occupied[xx,yy] = i + 1
+                if (layer.terrain[xx,yy] in current_mob.terrain and layer.occupied[xx,yy] == 0):
+                    layer.occupied[xx,yy] = i + 1
                     mymap[xx,yy] = current_mob.emoji
         print("*" * 40, i)
-        for x, y, val in mymap:
+        for xy, val in mymap:
             print(val, end=" ")
-            if x == mymap.width - 1:
+            if xy.x == mymap.width - 1:
                 print("\n")
-    test = mob("!", 3, ["💦"])
-    test1 = mob("!", 3, ["e"])
+
     
