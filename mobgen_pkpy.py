@@ -152,6 +152,7 @@ def select_valid_pos(
 ) -> tuple[int, int, tuple[int, int, int, int]]:
     """
     select a valid area for the mob horde. Border points are INCLUDED\n
+    score controls the size of the horde, must > 0, better < 1\n
     @Return: the center position and the border coordinate of the rectangle\n
     """
     w = scc.width
@@ -209,45 +210,38 @@ def _score(layer:Layer, mob:Mob, x:int, y:int, score:float) -> tuple[int, int, i
                 downy += 1
             cnt = 0
 
-def _dist_unsqrt(coord1: vec2i, coord2: vec2i) -> int:
+def _splash_curve(factor: float, basic_prob: int, x: float) -> int:
     """
-    calculate the distance between coord1 and coord2, not sqrted\n
+    return the probability (0,100) of generating a mob at current pos\n
+    x is the standard distance (0,1)
     """
-    return abs(coord1.x-coord2.x)**2 + abs(coord1.y-coord2.y)**2
+    curve = 24*(x**5) - 60*(x**4) + 52*(x**3) - 18*(x**2) + x + 0.98#basic math curve func
+    fx = (1 - factor) * curve * 100 + basic_prob * factor#curve with factor
+    if fx < 0:
+        fx = 0
+    return int(fx)
 
 def _splash_factor_assist(current_pos:vec2i, center_pos:vec2i, splash_factor: float, range: int, basic_prob: int) -> bool:
     """
     return True if here can generate a mob\n
     """
-    dist = _dist_unsqrt(current_pos, center_pos)
-    
+    dist = (current_pos - center_pos).dot(current_pos - center_pos)
+    standard_dist: float = dist/range#the standard distance
+    prob = _splash_curve(splash_factor, basic_prob, standard_dist)
+    if random.randint(1, 100) <= prob:
+        return True
     return False
-    
 
 def spawn_splash(mymap: array2d[str], layer:Layer, i:int, mob:Mob, x:int, y:int, rect:tuple[int,int,int,int], splash_factor:float) -> None:
     """
     generate horde sample\n
     factor = (0,1) 0=closer
-    - TODO
-    Imagine a largest circle on the rect, which has its center on (x,y). 
-    As we know the basic param of a circle is d and r (d=2r), so with the
-    splash_factor, we have r_new = r * splash_factor.
-    Thus we have a new circle. Points in the circle have a high probablity 
-    to generate mobs, while those outside have a lower probablity. 
-    
-    But the probablity cannot be set to a step func, which would lead
-    to ridiculous result.
-    
-    The probability func should be: input factor, range, return prob
-    factor close to 1, almost equal prob within the range
-    factor close to 0, decreasing prob along with range
     """
     upx, upy, downx, downy = rect
     #calculate the maximum distance from the center
     max_x = max(abs(x - upx), abs(x - downx))
     max_y = max(abs(y - upy), abs(y - downy))
     max_range = max_x**2 + max_y**2
-    new_range = int(max_range * splash_factor)
     center_pos = vec2i(x, y)
     #calculate the basic probablity
     area = abs(upx-downx)*abs(upy-downy)
@@ -260,7 +254,7 @@ def spawn_splash(mymap: array2d[str], layer:Layer, i:int, mob:Mob, x:int, y:int,
             coord = vec2i(_x, _y)
             if layer.occupied == i and layer.terrain[coord] in mob.terrain and generated_mob_cnt < mob.num:
                 #valid terrain and not occupied by other mobs
-                result = _splash_factor_assist(coord, center_pos, splash_factor, new_range, basic_prob)
+                result = _splash_factor_assist(coord, center_pos, splash_factor, max_range, basic_prob)
                 if result:
                     layer.occupied[coord] = -1
                     mymap[coord] = mob.emoji
@@ -283,19 +277,21 @@ if __name__ == "__main__":
     #         print("\n")
 
     layer = Layer(mymap)
-    for i in range(10):
+    for i in range(5):
         current_mob = get_random_mob()
-        x,y, rect = select_valid_pos(layer, scc, scc_emoji, scc_area, current_mob, 0.3)
+        x,y, rect = select_valid_pos(layer, scc, scc_emoji, scc_area, current_mob, 0.8)#adjustable
         upx, upy, downx, downy = rect
         for xx in range(upx, downx + 1):
             for yy in range(upy, downy + 1):
                 if (layer.terrain[xx,yy] in current_mob.terrain and layer.occupied[xx,yy] == 0):
                     layer.occupied[xx,yy] = i + 1
-                    mymap[xx,yy] = current_mob.emoji
+                    # mymap[xx,yy] = current_mob.emoji
+        spawn_splash(mymap, layer, i+1, current_mob, x, y, rect, 0.05)#adjustable
         print("*" * 40, i)
-        for xy, val in mymap:
-            print(val, end=" ")
-            if xy.x == mymap.width - 1:
-                print("\n")
+        # for xy, val in mymap:
+        #     print(val, end=" ")
+        #     if xy.x == mymap.width - 1:
+        #         print("\n")
+        print(mymap.render())
 
     
